@@ -303,6 +303,39 @@
        */
       circleeffect: [],
 
+      /* callback horizontalsliceeffect(beatTime, duration)
+       * Called on the start of a horizontal slice effect.
+       *
+       * beatTime: The timestamp of the beat that the slice started on
+       * duration: The length of the effect in seconds.
+       */
+      horizontalsliceeffect: [],
+
+      /* callback verticalsliceeffect(beatTime, duration)
+       * Called on the start of a vertical slice effect.
+       *
+       * beatTime: The timestamp of the beat that the slice started on
+       * duration: The length of the effect in seconds.
+       */
+      verticalsliceeffect: [],
+
+      /* callback doublesliceeffect(beatTime, duration)
+       * Called on the start of a double slice effect.
+       *
+       * beatTime: The timestamp of the beat that the slice started on
+       * duration: The length of the effect in seconds.
+       */
+      doublesliceeffect: [],
+
+      /* callback shuttereffect(beatTime, duration, direction)
+       * Called on the start of a shutter effect.
+       *
+       * beatTime: The timestamp of the beat that the shutter started on
+       * duration: The length of the effect in seconds.
+       * direction: "left", "right", "up", or "down".
+       */
+      shuttereffect: [],
+
       /* callback beat(beatInfo)
        * Called when the beat has changed, after all of the callbacks to update
        * effects, but before the frame callback.
@@ -1696,7 +1729,7 @@
   };
   Hues["getCurrentHue"] = getCurrentHue;
 
-  var changeHue = function(hueIndex) {
+  var changeHue = function(hueIndex, beatTime, fadeDuration) {
     var hues = self.hues;
     if (hueIndex < 0) {
       hueIndex = 0;
@@ -1707,10 +1740,17 @@
     var hue = hues[hueIndex];
     self.hueIndex = hueIndex;
     self.hue = hue;
-    self.callEventListeners("huechange", {"index": hueIndex, "hue": hue});
+    if (typeof(beatTime) === "undefined") {
+      beatTime = null;
+    }
+    if (typeof(fadeDuration) === "undefined") {
+      fadeDuration = 0;
+    }
+    self.callEventListeners("huechange", {"index": hueIndex, "hue": hue},
+        beatTime, fadeDuration);
   }
 
-  var randomHue = function() {
+  var randomHue = function(beatTime, fadeDuration) {
     var hues = self["hues"];
     var index = self["hueIndex"];
     var newIndex;
@@ -1722,7 +1762,7 @@
         newIndex += 1;
       }
     }
-    changeHue(newIndex);
+    changeHue(newIndex, beatTime, fadeDuration);
   }
 
 
@@ -1796,13 +1836,13 @@
      *   Toggles between normal and inverted states.
      * "I": Invert & change image
      *   Same as "i", bit in addition the image is changed.
-     * "s": Horizontal slice (not implemented)
-     * "S": Horizontal slice and change image (not implemented)
-     * "v": Vertical slice (not implemented)
-     * "V": Vertical slice and change image (not implemented)
-     * "#": Double slice (not implemented)
-     * "@": Double slice and change image (not implemented)
-     * "←", "↓", "↑", "→": Shutter (not implemented)
+     * "s": Horizontal slice
+     * "S": Horizontal slice and change image
+     * "v": Vertical slice
+     * "V": Vertical slice and change image
+     * "#": Double slice
+     * "@": Double slice and change image
+     * "←", "↓", "↑", "→": Shutter
      */
 
     /* Effects that cause vertical blur */
@@ -1853,15 +1893,11 @@
 
     /* Fade color */
     if (current == "~" || current == "=") {
-      var prevHue = self.hue;
-      // TODO: This currently calls the huechange callback
-      randomHue();
       /* Find the next non-null beat */
       var i = 0;
       for (i = 0; i < rest.length && rest[i] == "."; i++);
       var duration = (i + 1) * self.beatDuration;
-      self.callEventListeners("fadehueeffect", beat.time, duration,
-          prevHue, self.hue);
+      randomHue(beat.time, duration);
     }
 
     /* Invert toggle */
@@ -1880,6 +1916,35 @@
     if (current == "(" || current == "<"
         || (self.trippyMode && (current == "x" || current == "X"))) {
       self.callEventListeners("circleeffect", beat.time, /*in=*/false);
+    }
+
+    /* Horizontal slice */
+    if (current == "s" || current == "S") {
+      self.callEventListeners("horizontalsliceeffect", beat.time, self.beatDuration);
+    }
+
+    /* Vertical slice */
+    if (current == "v" || current == "V") {
+      self.callEventListeners("verticalsliceeffect", beat.time, self.beatDuration);
+    }
+
+    /* Double slice */
+    if (current == "#" || current == "@") {
+      self.callEventListeners("doublesliceeffect", beat.time, self.beatDuration);
+    }
+
+    /* Shutter */
+    if (current == "←") {
+      self.callEventListeners("shuttereffect", beat.time, self.beatDuration, "left");
+    }
+    if (current == "→") {
+      self.callEventListeners("shuttereffect", beat.time, self.beatDuration, "right");
+    }
+    if (current == "↑") {
+      self.callEventListeners("shuttereffect", beat.time, self.beatDuration, "up");
+    }
+    if (current == "↓") {
+      self.callEventListeners("shuttereffect", beat.time, self.beatDuration, "down");
     }
 
   };

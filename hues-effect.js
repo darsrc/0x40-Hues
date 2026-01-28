@@ -103,11 +103,60 @@ window.HuesEffect = (function() {
     "uniform vec3 u_blackoutColor;\n" +
     "uniform float u_invert;\n" +
     "uniform sampler2D u_image;\n";
+  var COMPOSITE_FRAGMENT_SOURCE_EFFECTS =
+    "uniform vec2 u_canvasSize;\n" +
+    "uniform float u_sliceMode;\n" +
+    "uniform float u_sliceAmplitude;\n" +
+    "uniform vec2 u_sliceBandSize;\n" +
+    "uniform float u_shutterActive;\n" +
+    "uniform vec2 u_shutterDirection;\n" +
+    "uniform float u_shutterProgress;\n" +
+    "vec2 applySlice(vec2 pos) {\n" +
+    "  if (u_sliceAmplitude <= 0.0) {\n" +
+    "    return pos;\n" +
+    "  }\n" +
+    "  if (u_sliceMode >= 1.0 && u_sliceMode < 2.0) {\n" +
+    "    float band = floor(gl_FragCoord.y / u_sliceBandSize.y);\n" +
+    "    float dir = mod(band, 2.0) * 2.0 - 1.0;\n" +
+    "    pos.x += dir * u_sliceAmplitude;\n" +
+    "  } else if (u_sliceMode >= 2.0 && u_sliceMode < 3.0) {\n" +
+    "    float band = floor(gl_FragCoord.x / u_sliceBandSize.x);\n" +
+    "    float dir = mod(band, 2.0) * 2.0 - 1.0;\n" +
+    "    pos.y += dir * u_sliceAmplitude;\n" +
+    "  } else if (u_sliceMode >= 3.0) {\n" +
+    "    float bandX = floor(gl_FragCoord.x / u_sliceBandSize.x);\n" +
+    "    float bandY = floor(gl_FragCoord.y / u_sliceBandSize.y);\n" +
+    "    float dirX = mod(bandY, 2.0) * 2.0 - 1.0;\n" +
+    "    float dirY = mod(bandX, 2.0) * 2.0 - 1.0;\n" +
+    "    pos.x += dirX * u_sliceAmplitude;\n" +
+    "    pos.y += dirY * u_sliceAmplitude;\n" +
+    "  }\n" +
+    "  return pos;\n" +
+    "}\n" +
+    "vec4 applyShutter(vec4 sample) {\n" +
+    "  if (u_shutterActive < 0.5) {\n" +
+    "    return sample;\n" +
+    "  }\n" +
+    "  vec2 coord = gl_FragCoord.xy / u_canvasSize;\n" +
+    "  float mask = 1.0;\n" +
+    "  if (u_shutterDirection.x > 0.5) {\n" +
+    "    mask = step(coord.x, u_shutterProgress);\n" +
+    "  } else if (u_shutterDirection.x < -0.5) {\n" +
+    "    mask = step(1.0 - coord.x, u_shutterProgress);\n" +
+    "  } else if (u_shutterDirection.y > 0.5) {\n" +
+    "    mask = step(coord.y, u_shutterProgress);\n" +
+    "  } else if (u_shutterDirection.y < -0.5) {\n" +
+    "    mask = step(1.0 - coord.y, u_shutterProgress);\n" +
+    "  }\n" +
+    "  return sample * mask;\n" +
+    "}\n";
   var COMPOSITE_FRAGMENT_SOURCE_SAMPLE =
     "vec4 sample(vec2 pos) {\n" +
     "  vec3 c = hue();\n" +
+    "  pos = applySlice(pos);\n" +
     "  float border = float(pos.x >= 0.0 && pos.x <= 1.0 && pos.y >= 0.0 && pos.y <= 1.0);\n" +
-    "  return blend(texture2D(u_image, pos) * border, c);\n" +
+    "  vec4 blended = blend(texture2D(u_image, pos) * border, c);\n" +
+    "  return applyShutter(blended);\n" +
     "}\n";
   var COMPOSITE_FRAGMENT_SOURCE_NOBLUR =
     "varying vec2 v_imageSample;\n" +
@@ -436,6 +485,21 @@ window.HuesEffect = (function() {
     circleInStartTime: 0,
     circleInRadius: 0,
 
+    /* Slice effects */
+    sliceActive: false,
+    /* Slice mode: 0 none, 1 horizontal, 2 vertical, 3 double */
+    sliceMode: 0,
+    sliceStartTime: 0,
+    sliceDuration: 0,
+    sliceAmplitude: 0.0,
+
+    /* Shutter effects */
+    shutterActive: false,
+    shutterStartTime: 0,
+    shutterDuration: 0,
+    shutterDirection: [ 1.0, 0.0 ],
+    shutterProgress: 0.0,
+
     /* Configuration */
 
     setSmartAlign(smartAlign) {
@@ -663,16 +727,6 @@ window.HuesEffect = (function() {
       self.blackoutColor = [ 1.0, 1.0, 1.0 ];
     },
 
-    fadeHueEffectCallback: function(beatTime, duration, prevHue, newHue) {
-      /* TODO: This might be handled by huechange later */
-      self.hueFadeActive = true;
-      self.hueFadeStartTime = beatTime;
-      self.hueFadeDuration = duration;
-      self.hueFadeStartHue = prevHue.rgb;
-      self.hueFadeEndHue = newHue.rgb;
-      self.renderNeeded = true;
-    },
-
     invertEffectCallback: function(beatTime, inverted) {
       if (inverted) {
         self.invert = 1.0;
@@ -690,6 +744,54 @@ window.HuesEffect = (function() {
         self.circleOutActive = true;
         self.circleOutStartTime = startTime;
       }
+    },
+
+    horizontalSliceEffectCallback: function(startTime, duration) {
+      self.sliceActive = true;
+      self.sliceMode = 1;
+      self.sliceStartTime = startTime;
+      self.sliceDuration = duration;
+      self.renderNeeded = true;
+    },
+
+    verticalSliceEffectCallback: function(startTime, duration) {
+      self.sliceActive = true;
+      self.sliceMode = 2;
+      self.sliceStartTime = startTime;
+      self.sliceDuration = duration;
+      self.renderNeeded = true;
+    },
+
+    doubleSliceEffectCallback: function(startTime, duration) {
+      self.sliceActive = true;
+      self.sliceMode = 3;
+      self.sliceStartTime = startTime;
+      self.sliceDuration = duration;
+      self.renderNeeded = true;
+    },
+
+    shutterEffectCallback: function(startTime, duration, direction) {
+      self.shutterActive = true;
+      self.shutterStartTime = startTime;
+      self.shutterDuration = duration;
+      self.shutterProgress = 0.0;
+      switch (direction) {
+      case "left":
+        self.shutterDirection = [ -1.0, 0.0 ];
+        break;
+      case "right":
+        self.shutterDirection = [ 1.0, 0.0 ];
+        break;
+      case "up":
+        self.shutterDirection = [ 0.0, -1.0 ];
+        break;
+      case "down":
+        self.shutterDirection = [ 0.0, 1.0 ];
+        break;
+      default:
+        self.shutterDirection = [ 1.0, 0.0 ];
+      }
+      self.renderNeeded = true;
     },
 
     /* Effect animations */
@@ -963,6 +1065,46 @@ window.HuesEffect = (function() {
       }
     },
 
+    sliceUpdate: function(time) {
+      if (!self.sliceActive) {
+        return;
+      }
+
+      var startTime = self.sliceStartTime;
+      var duration = self.sliceDuration;
+      var progress = (time - startTime) / duration;
+      if (progress >= 1) {
+        self.sliceActive = false;
+        self.sliceMode = 0;
+        self.sliceAmplitude = 0.0;
+        self.renderNeeded = true;
+        return;
+      }
+
+      var intensity = 1 - progress;
+      self.sliceAmplitude = 0.08 * intensity;
+      self.renderNeeded = true;
+    },
+
+    shutterUpdate: function(time) {
+      if (!self.shutterActive) {
+        return;
+      }
+
+      var startTime = self.shutterStartTime;
+      var duration = self.shutterDuration;
+      var progress = (time - startTime) / duration;
+      if (progress >= 1) {
+        self.shutterActive = false;
+        self.shutterProgress = 1.0;
+        self.renderNeeded = true;
+        return;
+      }
+
+      self.shutterProgress = Math.max(0, progress);
+      self.renderNeeded = true;
+    },
+
     /* Update the saved canvas size on resize */
     resizeCallback: function() {
       self.canvasSizeInspect();
@@ -974,6 +1116,8 @@ window.HuesEffect = (function() {
       self.blurUpdate(time);
       self.blackoutUpdate(time);
       self.circlesUpdate(time);
+      self.sliceUpdate(time);
+      self.shutterUpdate(time);
       self.imageAnimationUpdate(time);
       self.canvasSizeUpdate();
 
@@ -1032,9 +1176,23 @@ window.HuesEffect = (function() {
 
       /* Fragment shader */
 
+      /* Canvas size */
+      var uCanvasSizeLoc = gl.getUniformLocation(shader, "u_canvasSize");
+      gl.uniform2f(uCanvasSizeLoc, gl.drawingBufferWidth, gl.drawingBufferHeight);
+
       /* Horizontal/Vertical blur */
       var uBlur = gl.getUniformLocation(shader, "u_blur");
       gl.uniform2f(uBlur, self.blurX, self.blurY);
+
+      /* Slice effects */
+      var uSliceModeLoc = gl.getUniformLocation(shader, "u_sliceMode");
+      gl.uniform1f(uSliceModeLoc, self.sliceMode);
+      var uSliceAmplitudeLoc = gl.getUniformLocation(shader, "u_sliceAmplitude");
+      gl.uniform1f(uSliceAmplitudeLoc, self.sliceAmplitude);
+      var uSliceBandSizeLoc = gl.getUniformLocation(shader, "u_sliceBandSize");
+      var sliceBandX = Math.max(1, gl.drawingBufferWidth / 6);
+      var sliceBandY = Math.max(1, gl.drawingBufferHeight / 6);
+      gl.uniform2f(uSliceBandSizeLoc, sliceBandX, sliceBandY);
 
       /* Blackout */
       var uBlackoutLoc = gl.getUniformLocation(shader, "u_blackout");
@@ -1060,6 +1218,14 @@ window.HuesEffect = (function() {
       /* Invert */
       var uInvertLoc = gl.getUniformLocation(shader, "u_invert");
       gl.uniform1f(uInvertLoc, self.invert);
+
+      /* Shutter */
+      var uShutterActiveLoc = gl.getUniformLocation(shader, "u_shutterActive");
+      gl.uniform1f(uShutterActiveLoc, self.shutterActive ? 1.0 : 0.0);
+      var uShutterDirectionLoc = gl.getUniformLocation(shader, "u_shutterDirection");
+      gl.uniform2f(uShutterDirectionLoc, self.shutterDirection[0], self.shutterDirection[1]);
+      var uShutterProgressLoc = gl.getUniformLocation(shader, "u_shutterProgress");
+      gl.uniform1f(uShutterProgressLoc, self.shutterProgress);
 
       /* Do the actual draw command... */
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -1219,6 +1385,7 @@ window.HuesEffect = (function() {
         COMPOSITE_VERTEX_SOURCE_FOOTER;
       fragmentShaderSource =
         COMPOSITE_FRAGMENT_SOURCE_HEADER +
+        COMPOSITE_FRAGMENT_SOURCE_EFFECTS +
         colorSource +
         fragmentBlendSource +
         COMPOSITE_FRAGMENT_SOURCE_SAMPLE +
@@ -1268,9 +1435,12 @@ window.HuesEffect = (function() {
       hues.addEventListener("whiteouteffect", self.whiteoutEffectCallback);
       hues.addEventListener("shortblackouteffect", self.shortBlackoutEffectCallback);
       hues.addEventListener("shortwhiteouteffect", self.shortWhiteoutEffectCallback);
-      hues.addEventListener("fadehueeffect", self.fadeHueEffectCallback);
       hues.addEventListener("inverteffect", self.invertEffectCallback);
       hues.addEventListener("circleeffect", self.circleEffectCallback);
+      hues.addEventListener("horizontalsliceeffect", self.horizontalSliceEffectCallback);
+      hues.addEventListener("verticalsliceeffect", self.verticalSliceEffectCallback);
+      hues.addEventListener("doublesliceeffect", self.doubleSliceEffectCallback);
+      hues.addEventListener("shuttereffect", self.shutterEffectCallback);
       hues.addEventListener("frame", self.frameCallback);
     },
 

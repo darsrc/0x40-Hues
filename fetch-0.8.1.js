@@ -205,18 +205,35 @@
 
   function Request(url, options) {
     options = options || {}
-    this.url = url
+    var input = url
+    var body = options.body
 
-    this.credentials = options.credentials || 'omit'
-    this.headers = new Headers(options.headers)
-    this.method = normalizeMethod(options.method || 'GET')
-    this.mode = options.mode || null
-    this.referrer = null
+    if (Request.prototype.isPrototypeOf(input)) {
+      if (input.bodyUsed) {
+        throw new TypeError('Already read')
+      }
+      this.url = input.url
+      this.credentials = options.credentials || input.credentials || 'omit'
+      this.headers = new Headers(options.headers || input.headers)
+      this.method = normalizeMethod(options.method || input.method || 'GET')
+      this.mode = options.mode || input.mode || null
+      this.referrer = input.referrer || null
+      if (!body && input._bodyInit !== undefined) {
+        body = input._bodyInit
+      }
+    } else {
+      this.url = input
+      this.credentials = options.credentials || 'omit'
+      this.headers = new Headers(options.headers)
+      this.method = normalizeMethod(options.method || 'GET')
+      this.mode = options.mode || null
+      this.referrer = null
+    }
 
-    if ((this.method === 'GET' || this.method === 'HEAD') && options.body) {
+    if ((this.method === 'GET' || this.method === 'HEAD') && body) {
       throw new TypeError('Body not allowed for GET or HEAD requests')
     }
-    this._initBody(options.body)
+    this._initBody(body)
   }
 
   function decode(body) {
@@ -268,7 +285,6 @@
   self.Response = Response;
 
   self.fetch = function(input, init) {
-    // TODO: Request constructor should accept input, init
     var request
     if (Request.prototype.isPrototypeOf(input) && !init) {
       request = input
