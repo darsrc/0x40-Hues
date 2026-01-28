@@ -804,6 +804,27 @@
 
 
   var audioCtx = new AudioContext;
+  var resumeAudioContext = function() {
+    if (audioCtx && audioCtx.state === "suspended" && audioCtx.resume) {
+      return audioCtx.resume();
+    }
+    return Promise.resolve();
+  };
+  var audioResumeHooked = false;
+  var hookAudioResume = function() {
+    if (audioResumeHooked) {
+      return;
+    }
+    audioResumeHooked = true;
+    var resumeOnce = function() {
+      resumeAudioContext().then(function() {
+        window.removeEventListener("pointerdown", resumeOnce);
+        window.removeEventListener("keydown", resumeOnce);
+      });
+    };
+    window.addEventListener("pointerdown", resumeOnce);
+    window.addEventListener("keydown", resumeOnce);
+  };
   var currentBuildupSource = null;
   var currentBuildupBuffer = null;
   var currentBuildupStartTime = null;
@@ -814,11 +835,26 @@
   var gainNode = audioCtx.createGain();
   gainNode.connect(audioCtx.destination);
 
+  var readStorage = function(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch (error) {
+      return null;
+    }
+  };
+  var writeStorage = function(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch (error) {
+      return;
+    }
+  };
+
   var muted = false;
-  if (localStorage.getItem('Hues.muted') === "true") {
+  if (readStorage('Hues.muted') === "true") {
     muted = true;
   }
-  var savedGain = parseFloat(localStorage.getItem('Hues.gain'));
+  var savedGain = parseFloat(readStorage('Hues.gain'));
   if (savedGain === null || isNaN(savedGain)) {
     savedGain = -10.0;
   }
@@ -842,8 +878,8 @@
   }
 
   addEventListener('volumechange', function(muted, gain) {
-    localStorage.setItem('Hues.muted', muted);
-    localStorage.setItem('Hues.gain', gain);
+    writeStorage('Hues.muted', muted);
+    writeStorage('Hues.gain', gain);
   });
 
   Hues["respack"] = {};
@@ -897,7 +933,6 @@
   var loadRespackInfo = function(respack) {
     return new Promise(function(resolve, reject) {
       fetch(respack["uri"] + "/info.xml")
-      .catch(reject)
       .then(function(response) {
 
         if (!response.ok) {
@@ -920,14 +955,14 @@
           }
           resolve(respack);
         });
-      });
+      })
+      .catch(reject);
     });
   };
 
   var loadRespackHues = function(respack) {
     return new Promise(function(resolve, reject) {
       fetch(respack["uri"] + "/hues.xml")
-      .catch(reject)
       .then(function(response) {
         
         if (response.status == 404) {
@@ -955,7 +990,7 @@
             var hue = {};
             hue["name"] = node.getAttribute("name");
             var hex = node.textContent;
-            if (!hex[0] == "#") {
+            if (hex[0] !== "#") {
               hex = "#" + hex;
             }
             hue["hex"] = hex;
@@ -980,7 +1015,8 @@
 
           resolve(respack);
         });
-      });
+      })
+      .catch(reject);
     });
   }
 
@@ -1074,7 +1110,6 @@
   var loadRespackSongs = function(respack) {
     return new Promise(function(resolve, reject) {
       fetch(respack["uri"] + "/songs.xml")
-      .catch(reject)
       .then(function(response) {
         
         if (response.status == 404) {
@@ -1133,21 +1168,22 @@
             resolve(respack);
           }).catch(reject);
         });
-      });
+      })
+      .catch(reject);
     });
   }
 
   var loadRespackImageFetch = function(uri) {
     return new Promise(function(resolve, reject) {
       fetch(uri)
-      .catch(reject)
       .then(function(response) {
         if (!response.ok) {
           reject(response.status);
           return;
         }
         resolve(response);
-      });
+      })
+      .catch(reject);
     });
   }
 
@@ -1293,7 +1329,6 @@
   var loadRespackImages = function(respack) {
     return new Promise(function(resolve, reject) {
       fetch(respack["uri"] + "/images.xml")
-      .catch(reject)
       .then(function(response) {
         
         if (response.status == 404) {
@@ -1346,7 +1381,8 @@
           }).catch(reject);
 
         });
-      });
+      })
+      .catch(reject);
     });
   }
 
@@ -1441,6 +1477,7 @@
           respackPromises.push(loadRespack(respacks[i]));
         }
 
+        hookAudioResume();
         var setupPromise = Promise.all(respackPromises)
         .then(function(respacks) {
           var builtin = respacks.shift();
@@ -1628,7 +1665,7 @@
       self.callEventListeners("imagechange", self.image, audioCtx.currentTime);
       self.inverted = false;
       self.callEventListeners("inverteffect",
-          audioCtx.currenTime, self.inverted);
+          audioCtx.currentTime, self.inverted);
     }
 
     var suspend = Promise.resolve()
@@ -1638,12 +1675,7 @@
 
     var playback = suspend.then(startPlayback);
 
-    var resume;
-    if (audioCtx.suspend && audioCtx.resume) {
-      resume = playback.then(function() {return audioCtx.resume()});
-    } else {
-      resume = playback;
-    }
+    var resume = playback.then(resumeAudioContext);
 
     return resume.then(function() {
       return song;

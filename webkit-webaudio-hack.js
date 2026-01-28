@@ -45,14 +45,14 @@ if (typeof(window.AudioContext) === 'undefined' &&
   if (typeof(window.AudioContext.prototype.createGain) === 'undefined' &&
       typeof(window.AudioContext.prototype.createGainNode) !== 'undefined') {
     window.AudioContext.prototype.createGain =
-      window.audioContext.prototype.createGainNode
+      window.AudioContext.prototype.createGainNode
   }
-  if (typeof(window.AudioContext.prototype.hack_createBufferSource) ===
+  if (typeof(window.AudioContext.prototype._hack_createBufferSource) ===
       'undefined') {
     window.AudioContext.prototype._hack_createBufferSource =
       window.AudioContext.prototype.createBufferSource
     window.AudioContext.prototype.createBufferSource = function() {
-      var node = this.hack_createBufferSource()
+      var node = this._hack_createBufferSource()
       if (typeof(node.start) === 'undefined') {
         // This doesn't permit the 2-argument start method.
         node.start = node.noteOn
